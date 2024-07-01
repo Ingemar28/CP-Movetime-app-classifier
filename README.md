@@ -5,12 +5,20 @@ This repository contains a script to classify activities from accelerometer data
 ## Setup
 
 1. Clone the repository:
-   ```bash
-   git clone https://github.com/yourusername/activity-classification.git
-   cd activity-classification
-   ```
+```bash
+git clone https://github.com/yourusername/activity-classification.git
+cd activity-classification
+```
 
 2. Install the required packages:
-    ```bash
-    pip install -r requirements.txt
-    ```
+```bash
+pip install -r requirements.txt
+```
+
+## Usage
+The script reads accelerometer data, processes it, and classifies the activities using a pre-trained Random Forest model. The input data should be in CSV file format.
+
+### Running the Script
+```bash
+python script/classify.py
+```

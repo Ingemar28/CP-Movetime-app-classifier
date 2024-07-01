@@ -107,7 +107,6 @@ def main(input_file):
     output_df['prediction'] = preds_labels
 
     # Save the output DataFrame to CSV
-    # output_file = os.path.join(output_dir, 'output_with_predictions.csv')
     output_file = 'output_with_predictions.csv'
     output_df.to_csv(output_file, index=False)
     print(f"Predictions saved to {output_file}")
@@ -117,10 +116,6 @@ if __name__ == "__main__":
     # input_file = input("Please enter the path to your input binary file: ")
 
     ##### testing with csv file, replace with other csv file path
-    input_file = '/Users/ingemar/Library/Mobile Documents/com~apple~CloudDocs/Desktop/UQ/acce_model/datasets/SENs/20230032-23_acc_24_11_2023_SENs_Raw_labeled.csv'
-    main(input_file)
-
+    input_file = input("Please enter the path to your input csv file: ")
     # input_file = '/Users/ingemar/Library/Mobile Documents/com~apple~CloudDocs/Desktop/UQ/acce_model/datasets/SENs/20230032-23_acc_24_11_2023_SENs_Raw_labeled.csv'
-    # output_dir = input("Please enter the path to your output directory: ")
-    # frequency = float(input("Please enter the frequency (Hz): "))
-    # main(input_file, output_dir, frequency)
+    main(input_file)
