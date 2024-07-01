@@ -6,8 +6,8 @@ This repository contains a script to classify activities from accelerometer data
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/activity-classification.git
-cd activity-classification
+git clone https://github.com/Ingemar28/CP-Movetime-app-classifier.git
+cd CP-Movetime-app-classifier
 ```
 
 2. Install the required packages:
