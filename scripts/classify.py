@@ -53,16 +53,6 @@ def window_features(df, window_size, step_size, frequency):
 
     return np.array(data), timestamps, xyz_means, feature_names
 
-def detect_non_wear_periods(df, window_size=36000, step_size=18000, threshold=0.01):
-    non_wear = np.zeros(len(df), dtype=bool)
-    
-    for start in range(0, len(df) - window_size + 1, step_size):
-        segment = df.iloc[start:start+window_size]
-        if segment[['x', 'y', 'z']].std().max() < threshold:
-            non_wear[start:start+window_size] = True
-
-    return non_wear
-
 def main(input_file):
     frequency = 12.5
     window_size = int(frequency * 8)  # 8 second window
@@ -83,9 +73,6 @@ def main(input_file):
     # Preprocess the data
     df = smoothing_data(df, window_smoothing_size)
 
-    # Detect non-wear periods
-    # non_wear_periods = detect_non_wear_periods(df)
-
     # Load and segment data
     data, timestamps, xyz_means, feature_names = window_features(df, window_size, step_size, frequency)
 
@@ -94,9 +81,6 @@ def main(input_file):
 
     preds = random_forest_model.predict(data)
     preds_labels = label_encoder.inverse_transform(preds)  # Convert numeric predictions to string labels
-
-    # Handle non-wear periods in predictions
-    # preds_labels[non_wear_periods[::step_size]] = 'Non-wear'
 
     # Prepare the output DataFrame
     output_df = pd.DataFrame(data, columns=feature_names)
