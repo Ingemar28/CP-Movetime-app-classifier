@@ -91,7 +91,7 @@ def main(input_file):
     output_df['prediction'] = preds_labels
 
     # Save the output DataFrame to CSV
-    output_file = 'output_with_predictions.csv'
+    output_file = '../output_with_predictions.csv'
     output_df.to_csv(output_file, index=False)
     print(f"Predictions saved to {output_file}")
 

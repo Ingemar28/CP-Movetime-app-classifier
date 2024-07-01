@@ -20,5 +20,6 @@ The script reads accelerometer data, processes it, and classifies the activities
 
 ### Running the Script
 ```bash
+cd scripts/
 python classify.py
 ```
