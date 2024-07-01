@@ -76,7 +76,7 @@ def main(input_file):
     # Load and segment data
     data, timestamps, xyz_means, feature_names = window_features(df, window_size, step_size, frequency)
 
-    with open('models/rf_model.pkl', 'rb') as file:
+    with open('../models/rf_model.pkl', 'rb') as file:
         random_forest_model = pickle.load(file)
 
     preds = random_forest_model.predict(data)
