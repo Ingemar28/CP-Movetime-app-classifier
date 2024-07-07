@@ -1,17 +1,27 @@
 import os
+import math
 import struct
+import pickle
 import numpy as np
 import pandas as pd
-import pickle
-from sklearn.preprocessing import LabelEncoder
+from scipy.stats import mode
 from rf_function import extract_acc_fet
-import math
+from sklearn.preprocessing import LabelEncoder
+
+def get_params(frequency=12.5):
+    # Function to calculate parameters based on frequency.
+    params = {
+        'frequency': frequency,
+        'window_size': int(frequency * 8),  # 8 second window
+        'step_size': int(frequency * 4),  # 4 second window (50% overlap)
+        'window_smoothing_size': 3,  # Determined by the trained RF model
+        'sd_threshold': 0.001,
+        'boutlength_windows': int(55 * 60 / 4),  # minimum non-wear period length in windows 
+        'short_wear_threshold': int(12 / 4)  # maximum wear period length surrounded by non-wear
+    }
+    return params
 
 def read_binary_file(file_path):
-    # Check if input file is a binary file
-    if not file_path.lower().endswith('.bin'):
-        raise ValueError(f"The file {file_path} is not a binary file. Please provide a .bin file.")
-
     # Read binary file and convert to DataFrame
     s = struct.Struct('>qhhh')
     sz = os.path.getsize(file_path)
@@ -26,19 +36,17 @@ def read_binary_file(file_path):
     
     df = pd.DataFrame(data, columns=['datetime', 'x', 'y', 'z'])
     
-    df['datetime'] = pd.to_datetime(df['datetime'], unit='ms').dt.tz_localize('UTC').dt.tz_convert('Australia/Perth')
+    #### remove timezone at the end
+    df['datetime'] = pd.to_datetime(df['datetime'], unit='ms').dt.tz_localize('UTC').dt.tz_convert('Australia/Brisbane')
     df['datetime'] = df['datetime'].dt.strftime('%Y-%m-%d %H:%M:%S.%f').str[:-3]
     
     # Scale acc data
     df[['x', 'y', 'z']] = df[['x', 'y', 'z']] * 0.0078125
 
-    # df = df.replace([np.inf, -np.inf], np.nan)
-    # df = df.fillna(0)
-
     return df
 
 def smoothing_data(df, window_smoothing_size):
-    # Smooth the data
+    # Smooth the raw acc data
     df = df.assign(
         x=df['x'].rolling(window=window_smoothing_size, min_periods=1, center=True).mean(),
         y=df['y'].rolling(window=window_smoothing_size, min_periods=1, center=True).mean(),
@@ -47,6 +55,7 @@ def smoothing_data(df, window_smoothing_size):
     return df
 
 def window_features(df, window_size, step_size, frequency):
+    # Segment data into windows and extract features.
     data, timestamps, xyz_means, xyz_std = [], [], [], []
     feature_names = None
 
@@ -56,18 +65,29 @@ def window_features(df, window_size, step_size, frequency):
         features_series = extract_acc_fet(segment_data, Hz=frequency)
         data.append(features_series.values)
         timestamps.append(segment.iloc[0]['datetime'])  # Use the timestamp of the first row in the segment
-        xyz_means.append(segment_data.mean().values)  # Calculate mean values for x, y, z
-        xyz_std.append(segment_data.std().values)  # Calculate mean values for x, y, z
+        xyz_means.append(np.round(segment_data.mean().values, 3))  # Calculate mean values for x, y, z
+        xyz_std.append(np.round(segment_data.std().values, 3))  # Calculate std values for x, y, z
 
         if not feature_names:
             feature_names = features_series.index.to_list()
 
     return np.array(data), timestamps, xyz_means, xyz_std, feature_names
 
-def detect_non_wear_periods(df, sd_threshold, window_size, boutlength, short_wear_threshold, frequency):
+def lag_lead_smoothing(predictions, lag, lead):
+    # Smooth predictions using a lag-lead approach
+    smoothed_predictions = []
+    for i in range(len(predictions)):
+        start = max(0, i - lag)
+        end = min(len(predictions), i + lead + 1)
+        window_predictions = predictions[start:end]
+        smoothed_predictions.append(mode(window_predictions, keepdims=True).mode[0])
+    return np.array(smoothed_predictions)
+
+def detect_non_wear_periods(df, sd_threshold, window_size, boutlength_windows, short_wear_threshold, frequency):
+    # Detect non-wear periods in the data.
+
     # Label windows with low standard deviation as non-wear (1)
     non_wear_windows = (df['x_std'] < sd_threshold) & (df['y_std'] < sd_threshold) & (df['z_std'] < sd_threshold)
-
     non_wear_windows = non_wear_windows.astype(int)
 
     # Perform run-length encoding to identify contiguous sequences
@@ -84,7 +104,6 @@ def detect_non_wear_periods(df, sd_threshold, window_size, boutlength, short_wea
     rle_pairs.append((count, prev_value))  # Append the last run
 
     # Merge non-wear periods interrupted by short wear periods
-    boutlength_windows = boutlength / 4  # Minimum number of winodws 
     merged_rle_pairs = []
     i = 0
     while i < len(rle_pairs):
@@ -95,7 +114,7 @@ def detect_non_wear_periods(df, sd_threshold, window_size, boutlength, short_wea
                 prev_length, prev_value = merged_rle_pairs[-1]
                 next_length, next_value = rle_pairs[i + 1]
                 # merge only when the wear period is surrunded with non-wear period that are long enough
-                if prev_value == 1 and next_value == 1 and prev_length + next_length >= boutlength_windows:
+                if prev_value == 1 and next_value == 1 and prev_length + next_length >= boutlength_windows / 2:
                     merged_rle_pairs.pop()
                     merged_rle_pairs.append((prev_length + length + next_length, 1))
 
@@ -114,41 +133,38 @@ def detect_non_wear_periods(df, sd_threshold, window_size, boutlength, short_wea
             filtered_wear[idx:idx + length] = 1  # label non-wear as 1
         idx += length
 
-    return filtered_wear
+    return filtered_wear 
 
-def main(input_file):
-    frequency = 12.5
-    window_size = int(frequency * 8)  # 8 second window (100 data)
-    step_size = int(frequency * 4)  # 4 second window (50% overlap)
-    window_smoothing_size = 3  # this is determined by trained rf model
-    sd_threshold = 0.01  # Standard deviation threshold
-    boutlength = 45 * 60  # Minimum non-wear period length in seconds
-    short_wear_threshold = 3  # number of 4-second windows
-
-    # Label encoder for predictions, exact same as trained model
-    all_class_names = ['Cycle', 'Sit', 'Stand / SUM', 'Walk']
-    label_encoder = LabelEncoder()
-    label_encoder.fit(all_class_names)
+def process_file(input_file_path, output_file_path, random_forest_model, label_encoder, params):
+    """
+    Process a single binary file and save the results to a CSV file.
+    
+    Parameters:
+        input_file_path (str): Path to the input binary file.
+        output_file_path (str): Path to save the output CSV file.
+        random_forest_model (RandomForestClassifier): Trained Random Forest model.
+        label_encoder (LabelEncoder): Label encoder for predictions.
+        params (dict): Dictionary containing parameters.
+    """
+    print(f"Processing file: {input_file_path}")
 
     # Read the binary file and convert to DataFrame
-    df = read_binary_file(input_file)
+    df = read_binary_file(input_file_path)
     
-    # Preprocess the data
-    df = smoothing_data(df, window_smoothing_size)
+    # Smooth the raw data
+    df = smoothing_data(df, params['window_smoothing_size'])
 
     # Segment data with features
-    feature_data, timestamps, xyz_means, xyz_std, feature_names = window_features(df, window_size, step_size, frequency)
+    feature_data, timestamps, xyz_means, xyz_std, feature_names = window_features(df, params['window_size'], params['step_size'], params['frequency'])
 
-    # Predict the segemnted data
-    with open('../models/rf_model.pkl', 'rb') as file:
-        random_forest_model = pickle.load(file)
-
+    # Predict the segmented data
     preds = random_forest_model.predict(feature_data)
-    preds_labels = label_encoder.inverse_transform(preds)  # Convert numeric predictions to string labels
+    preds = lag_lead_smoothing(preds, lag=3, lead=3)
+    preds_labels = label_encoder.inverse_transform(preds)
 
     # Prepare the output DataFrame
-    output_df = pd.DataFrame(feature_data, columns=feature_names)
-    output_df.insert(0, 'datetime_window', timestamps)  # Insert timestamps as the first column
+    output_df = pd.DataFrame(np.round(feature_data, 3), columns=feature_names)
+    output_df.insert(0, 'datetime_window', timestamps)
     output_df.insert(1, 'x_mean', [m[0] for m in xyz_means])
     output_df.insert(2, 'y_mean', [m[1] for m in xyz_means])
     output_df.insert(3, 'z_mean', [m[2] for m in xyz_means])
@@ -157,24 +173,56 @@ def main(input_file):
     output_df.insert(output_df.shape[1], 'y_std', [std[1] for std in xyz_std])
     output_df.insert(output_df.shape[1], 'z_std', [std[2] for std in xyz_std])
 
-    # print(f"before detecting {len(output_df)}")
-
     # Detect non-wear periods using std values
-    non_wear_periods = detect_non_wear_periods(output_df, sd_threshold, window_size, boutlength, short_wear_threshold, frequency)
-    output_df = output_df[non_wear_periods == 0]
+    non_wear_periods = detect_non_wear_periods(output_df, params['sd_threshold'], params['window_size'], params['boutlength_windows'], params['short_wear_threshold'], params['frequency'])
+    output_df.loc[non_wear_periods == 1, 'prediction'] = 'non-wear'
 
-    # print(f"after detecting {len(output_df)}")
+    # print(f"After detecting non-wear periods: {len(output_df[output_df['prediction'] == 'non-wear'])}")
+
+    # Add column for upright vs non-upright
+    upright_activities = ['Stand / SUM', 'Walk']
+    output_df['body_position'] = output_df['prediction'].apply(lambda x: 'upright' if x in upright_activities else 'non-upright')
+
+    # Add column to indicate changes between upright and non-upright
+    output_df['change'] = 'no change'
+    body_position_shifted = output_df['body_position'].shift(-1)
+    output_df.loc[(output_df['body_position'] == 'non-upright') & (body_position_shifted == 'upright'), 'change'] = 'stand up'
+    output_df.loc[(output_df['body_position'] == 'upright') & (body_position_shifted == 'non-upright'), 'change'] = 'sit down'
 
     # Remove std columns before saving
     output_df.drop(columns=['x_std', 'y_std', 'z_std'], inplace=True)
 
     # Save the output DataFrame to CSV
-    output_file = '../output_20230032-01_acc_27_11_2023.csv'
-    output_df.to_csv(output_file, index=False)
-    print(f"Predictions saved to {output_file}")
+    output_df.to_csv(output_file_path, index=False)
+    print(f"Predictions saved to {output_file_path}")
 
+def main():
+    input_folder = input("Please enter the path to your input folder containing .bin files: ")
+    output_folder = input("Please enter the path to your output folder: ")
+
+    if not os.path.exists(input_folder):
+        print(f"Input folder '{input_folder}' does not exist. Please provide a valid path.")
+        return
+
+    if not os.path.exists(output_folder):
+        print(f"Output folder '{output_folder}' does not exist. Please provide a valid path.")
+        return
+
+    # Get parameters
+    params = get_params()
+
+    all_class_names = ['Cycle', 'Sit', 'Stand / SUM', 'Walk']
+    label_encoder = LabelEncoder()
+    label_encoder.fit(all_class_names)
+
+    with open('models/rf_model.pkl', 'rb') as file:
+        random_forest_model = pickle.load(file)
+
+    for file_name in os.listdir(input_folder):
+        if file_name.lower().endswith('.bin'):
+            input_file_path = os.path.join(input_folder, file_name)
+            output_file_path = os.path.join(output_folder, f'processed_{file_name}.csv')
+            process_file(input_file_path, output_file_path, random_forest_model, label_encoder, params)
 
 if __name__ == "__main__":
-    # input_file = input("Please enter the path to your input binary file: ")
-    input_file = '/Users/ingemar/Library/Mobile Documents/com~apple~CloudDocs/Desktop/UQ/acce_model/datasets/bin_files/export_20230032-01_acc_27_11_2023.bin'
-    main(input_file)
+    main()
