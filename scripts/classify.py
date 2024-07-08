@@ -9,7 +9,7 @@ from rf_function import extract_acc_fet
 from sklearn.preprocessing import LabelEncoder
 
 def get_params(frequency=12.5):
-    # Function to calculate parameters based on frequency.
+    # Function to calculate parameters based on frequency(default 12.5Hz).
     params = {
         'frequency': frequency,
         'window_size': int(frequency * 8),  # 8 second window
@@ -55,7 +55,7 @@ def smoothing_data(df, window_smoothing_size):
     return df
 
 def window_features(df, window_size, step_size, frequency):
-    # Segment data into windows and extract features.
+    # Segment data into windows and extract features
     data, timestamps, xyz_means, xyz_std = [], [], [], []
     feature_names = None
 
@@ -188,6 +188,9 @@ def process_file(input_file_path, output_file_path, random_forest_model, label_e
     body_position_shifted = output_df['body_position'].shift(-1)
     output_df.loc[(output_df['body_position'] == 'non-upright') & (body_position_shifted == 'upright'), 'change'] = 'stand up'
     output_df.loc[(output_df['body_position'] == 'upright') & (body_position_shifted == 'non-upright'), 'change'] = 'sit down'
+
+    # Set 'body_position' and 'change' to 'non-wear' during non-wear periods
+    output_df.loc[output_df['prediction'] == 'non-wear', ['body_position', 'change']] = 'non-wear'
 
     # Remove std columns before saving
     output_df.drop(columns=['x_std', 'y_std', 'z_std'], inplace=True)
