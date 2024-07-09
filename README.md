@@ -26,8 +26,7 @@ This repository contains the code for processing and classifying accelerometer d
 2. Run the script:
 
     ```bash
-    cd scripts/
-    python classify.py
+    python scripts/classify.py
     ```
 
 3. The script will prompt you to enter the paths to your input and output folders:
